@@ -517,16 +517,15 @@ __all__ = [
 ]""",
     },
     # ----------------------------------------------------------
-    # Patch 10: utils.py — Add backend="torch_native" to
-    #           apply_token_bitmask_inplace call
+    # Patch 10: utils.py — Keep apply_token_bitmask_inplace call compatible
+    #           with xgrammar versions used in Kunlun environments
     # ----------------------------------------------------------
     {
         "file": "vllm/v1/structured_output/utils.py",
         "desc": (
-            "Add backend='torch_native' parameter to "
-            "xgr.apply_token_bitmask_inplace call. Without this parameter, "
-            "the default backend may not be compatible with the Kunlun "
-            "platform on PyTorch 2.5.1."
+            "Keep xgr.apply_token_bitmask_inplace call unchanged. Kunlun now "
+            "patches xgrammar at runtime to force a safe fallback backend, "
+            "and some xgrammar releases do not accept a backend= keyword."
         ),
         "lines": "119",
         "old": (
@@ -535,7 +534,7 @@ __all__ = [
         ),
         "new": (
             "xgr.apply_token_bitmask_inplace(logits, grammar_bitmask, "
-            'indices=index_tensor, backend="torch_native")'
+            "indices=index_tensor)"
         ),
     },
 ]

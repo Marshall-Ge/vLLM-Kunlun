@@ -75,6 +75,7 @@ def register():
     try:
         from .schema import direct_register_custom_op  # noqa: F401
         from .schema import patch_annotations_for_schema  # noqa: F401
+        from .xgrammar_compat import patch_xgrammar
 
         logger.info("[KunlunPlugin] vllm_utils_wrapper loaded and patched")
     except Exception:
@@ -104,6 +105,15 @@ def register():
         logger.info("[KunlunPlugin] import_hook() ok")
     except Exception:
         logger.exception("[KunlunPlugin] import_hook() failed")
+        raise
+
+    try:
+        if patch_xgrammar():
+            logger.info("[KunlunPlugin] xgrammar compatibility patch applied")
+        else:
+            logger.info("[KunlunPlugin] xgrammar not available, skip patch")
+    except Exception:
+        logger.exception("[KunlunPlugin] xgrammar compatibility patch failed")
         raise
 
     # --- register reasoning parser override (lazy, to avoid circular import) ---
