@@ -65,3 +65,16 @@ def register_model():
     """Register models for training and inference"""
     from .models import register_model as _reg
     _reg()
+
+def register_tool_parser():
+    from .entrypoints.openai.tool_parsers import (
+        register_tool_parser as _reg_tool_parser,
+    )
+
+    _reg_tool_parser()
+
+
+def register_reasoning_parser():
+    from .reasoning import register_reasoning_parser as _reg_reasoning_parser
+
+    _reg_reasoning_parser()
