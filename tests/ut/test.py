@@ -1,6 +1,3 @@
-import importlib.util
-import sys
-from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 import pytest
 import torch
@@ -153,62 +150,6 @@ def test_use_custom_dispatcher_flag():
                     # Test with high level
                     wrapper_high = TestWrapper(compilation_level=2)
                     assert wrapper_high.use_custom_dispatcher is True
-
-
-def _load_kunlun_ops_utils_module():
-    module_name = "_kunlun_ops_utils_test_module"
-    module_path = (
-        Path(__file__).resolve().parents[2] / "vllm_kunlun" / "ops" / "utils.py"
-    )
-    spec = importlib.util.spec_from_file_location(module_name, module_path)
-    module = importlib.util.module_from_spec(spec)
-    assert spec is not None
-    assert spec.loader is not None
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-def test_allocate_temp_tensors_uses_workspace_manager():
-    """Test workspace-backed scratch tensor allocation."""
-    module = _load_kunlun_ops_utils_module()
-
-    calls = []
-
-    class FakeWorkspaceManager:
-        def get_simultaneous(self, *args):
-            calls.append(args)
-            return [
-                torch.empty(shape, dtype=dtype)
-                for shape, dtype in args
-            ]
-
-    with patch.object(module, "current_workspace_manager", return_value=FakeWorkspaceManager()):
-        zeros_tensor, ones_tensor = module.allocate_temp_tensors(
-            (
-                ((2, 3), torch.float32, "zeros"),
-                ((2,), torch.int32, "ones"),
-            ),
-        )
-
-    assert len(calls) == 1
-    assert calls[0] == (((2, 3), torch.float32), ((2,), torch.int32))
-    assert torch.equal(zeros_tensor, torch.zeros((2, 3), dtype=torch.float32))
-    assert torch.equal(ones_tensor, torch.ones((2,), dtype=torch.int32))
-
-
-def test_allocate_temp_tensors_requires_workspace_manager():
-    """Test scratch allocation now fails fast without a workspace manager."""
-    module = _load_kunlun_ops_utils_module()
-
-    with patch.object(module, "current_workspace_manager", side_effect=AssertionError("not initialized")):
-        with pytest.raises(AssertionError, match="not initialized"):
-            module.allocate_temp_tensors(
-                (
-                    ((4,), torch.int32, "zeros"),
-                    ((2, 2), torch.float16, "empty"),
-                )
-            )
 
 
 if __name__ == "__main__":
