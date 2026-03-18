@@ -155,10 +155,10 @@ def test_use_custom_dispatcher_flag():
                     assert wrapper_high.use_custom_dispatcher is True
 
 
-def _load_kunlun_ops_module():
-    module_name = "_kunlun_ops_test_module"
+def _load_kunlun_ops_utils_module():
+    module_name = "_kunlun_ops_utils_test_module"
     module_path = (
-        Path(__file__).resolve().parents[2] / "vllm_kunlun" / "ops" / "_kunlun_ops.py"
+        Path(__file__).resolve().parents[2] / "vllm_kunlun" / "ops" / "utils.py"
     )
     spec = importlib.util.spec_from_file_location(module_name, module_path)
     module = importlib.util.module_from_spec(spec)
@@ -171,15 +171,7 @@ def _load_kunlun_ops_module():
 
 def test_allocate_temp_tensors_uses_workspace_manager():
     """Test workspace-backed scratch tensor allocation."""
-    with patch.dict(
-        sys.modules,
-        {
-            "cocopod": MagicMock(),
-            "xspeedgate_ops": MagicMock(),
-            "kunlun_ops": MagicMock(),
-        },
-    ):
-        module = _load_kunlun_ops_module()
+    module = _load_kunlun_ops_utils_module()
 
     calls = []
 
@@ -192,8 +184,7 @@ def test_allocate_temp_tensors_uses_workspace_manager():
             ]
 
     with patch.object(module, "current_workspace_manager", return_value=FakeWorkspaceManager()):
-        zeros_tensor, ones_tensor = module._allocate_temp_tensors(
-            torch.device("cpu"),
+        zeros_tensor, ones_tensor = module.allocate_temp_tensors(
             (
                 ((2, 3), torch.float32, "zeros"),
                 ((2,), torch.int32, "ones"),
@@ -206,30 +197,18 @@ def test_allocate_temp_tensors_uses_workspace_manager():
     assert torch.equal(ones_tensor, torch.ones((2,), dtype=torch.int32))
 
 
-def test_allocate_temp_tensors_falls_back_when_workspace_unavailable():
-    """Test scratch allocation fallback without a workspace manager."""
-    with patch.dict(
-        sys.modules,
-        {
-            "cocopod": MagicMock(),
-            "xspeedgate_ops": MagicMock(),
-            "kunlun_ops": MagicMock(),
-        },
-    ):
-        module = _load_kunlun_ops_module()
+def test_allocate_temp_tensors_requires_workspace_manager():
+    """Test scratch allocation now fails fast without a workspace manager."""
+    module = _load_kunlun_ops_utils_module()
 
     with patch.object(module, "current_workspace_manager", side_effect=AssertionError("not initialized")):
-        zeros_tensor, empty_tensor = module._allocate_temp_tensors(
-            torch.device("cpu"),
-            (
-                ((4,), torch.int32, "zeros"),
-                ((2, 2), torch.float16, "empty"),
-            ),
-        )
-
-    assert torch.equal(zeros_tensor, torch.zeros((4,), dtype=torch.int32))
-    assert empty_tensor.shape == (2, 2)
-    assert empty_tensor.dtype == torch.float16
+        with pytest.raises(AssertionError, match="not initialized"):
+            module.allocate_temp_tensors(
+                (
+                    ((4,), torch.int32, "zeros"),
+                    ((2, 2), torch.float16, "empty"),
+                )
+            )
 
 
 if __name__ == "__main__":
