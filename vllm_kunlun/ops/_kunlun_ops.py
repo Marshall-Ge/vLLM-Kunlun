@@ -17,12 +17,18 @@
 
 """kunlun custom op entry"""
 
+from collections.abc import Sequence
 from typing import Optional
 
 import cocopod  # noqa
 import torch
 import xspeedgate_ops  # noqa
 from vllm.logger import init_logger
+
+try:
+    from vllm.v1.worker.workspace import current_workspace_manager
+except ImportError:
+    current_workspace_manager = None
 
 logger = init_logger(__name__)
 
@@ -35,6 +41,43 @@ except ImportError as e:
 
 
 _per_token_smooth_quant = True
+
+
+def _allocate_temp_tensors(
+    device: torch.device,
+    specs: Sequence[tuple[tuple[int, ...], torch.dtype, str]],
+) -> list[torch.Tensor]:
+    """Allocate or reuse temporary tensors for Kunlun MoE scratch buffers."""
+
+    def _fresh_alloc() -> list[torch.Tensor]:
+        tensors = []
+        for shape, dtype, init in specs:
+            if init == "zeros":
+                tensor = torch.zeros(shape, dtype=dtype, device=device)
+            elif init == "ones":
+                tensor = torch.ones(shape, dtype=dtype, device=device)
+            else:
+                tensor = torch.empty(shape, dtype=dtype, device=device)
+            tensors.append(tensor)
+        return tensors
+
+    if current_workspace_manager is None:
+        return _fresh_alloc()
+
+    try:
+        tensors = current_workspace_manager().get_simultaneous(
+            *((shape, dtype) for shape, dtype, _ in specs)
+        )
+    except AssertionError:
+        return _fresh_alloc()
+
+    for tensor, (_, _, init) in zip(tensors, specs):
+        if init == "zeros":
+            tensor.zero_()
+        elif init == "ones":
+            tensor.fill_(1)
+
+    return tensors
 
 
 def is_per_token_smooth_quant():
@@ -495,21 +538,19 @@ class KunlunOps:
                 return out.sum(1)
 
             if M * moe_top_k > 768:
-                moe_expand = torch.empty(
-                    (M * moe_top_k, N),
-                    dtype=hidden_states.dtype,
-                    device=hidden_states.device,
-                )  # [M*top_k, N], float
-                expert_m = torch.zeros(
-                    global_num_experts, dtype=torch.int32, device=hidden_states.device
-                )  # [E]
-                sorted_tokens_num_lod = torch.zeros(
-                    global_num_experts + 1,
-                    dtype=torch.int32,
-                    device=hidden_states.device,
-                )  # [E+1]
-                sorted_tokens_idx = torch.zeros(
-                    M * moe_top_k, dtype=torch.int32, device=hidden_states.device
+                (
+                    moe_expand,
+                    expert_m,
+                    sorted_tokens_num_lod,
+                    sorted_tokens_idx,
+                ) = _allocate_temp_tensors(
+                    hidden_states.device,
+                    (
+                        ((M * moe_top_k, N), hidden_states.dtype, "empty"),
+                        ((global_num_experts,), torch.int32, "zeros"),
+                        ((global_num_experts + 1,), torch.int32, "zeros"),
+                        ((M * moe_top_k,), torch.int32, "zeros"),
+                    ),
                 )
 
                 torch.ops._C.gen_block_statistic(topk_ids, block_statistic)
@@ -534,17 +575,26 @@ class KunlunOps:
                     )
                 )
 
-            y = torch.empty(
-                M,
-                moe_top_k,
-                w1.shape[1],
-                dtype=hidden_states.dtype,
-                device=hidden_states.device,
-            )
+            y = _allocate_temp_tensors(
+                hidden_states.device,
+                (
+                    ((M, moe_top_k, w1.shape[1]), hidden_states.dtype, "empty"),
+                ),
+            )[0]
 
             moe_expand = moe_expand.view(M * moe_top_k, hidden_dim)
 
             if M < 1024:
+                out1 = _allocate_temp_tensors(
+                    hidden_states.device,
+                    (
+                        (
+                            (M, moe_top_k, y.shape[-1] // 2),
+                            y.dtype,
+                            "empty",
+                        ),
+                    ),
+                )[0]
                 torch.ops._C.moe_fc(
                     x=moe_expand,
                     weight=w1,
@@ -554,9 +604,6 @@ class KunlunOps:
                     y=y,
                 )
 
-                d = y.shape[-1] // 2
-                output_shape = y.shape[:-1] + (d,)
-                out1 = torch.empty(output_shape, dtype=y.dtype, device=y.device)
                 torch.ops._C.silu_and_mul(out1, y)
 
                 out1 = out1.reshape(-1, out1.shape[-1])
@@ -574,12 +621,12 @@ class KunlunOps:
                 y = y[..., : y.shape[-1] // 2]
                 out1 = y.reshape(-1, y.shape[-1])
 
-            out = torch.empty(
-                M,
-                moe_top_k,
-                w2.shape[1],
-                dtype=hidden_states.dtype,
-                device=hidden_states.device,
+            out, dequant_scale = _allocate_temp_tensors(
+                hidden_states.device,
+                (
+                    ((M, moe_top_k, w2.shape[1]), hidden_states.dtype, "empty"),
+                    ((M, moe_top_k), torch.float32, "ones"),
+                ),
             )
 
             torch.ops._C.moe_fc(
@@ -591,9 +638,6 @@ class KunlunOps:
                 y=out,
             )
 
-            dequant_scale = torch.ones(
-                [M, moe_top_k], dtype=torch.float32, device=out.device
-            )
             output = torch.empty(
                 [M, N], dtype=hidden_states.dtype, device=hidden_states.device
             )
