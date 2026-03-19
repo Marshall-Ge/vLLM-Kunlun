@@ -503,7 +503,8 @@ class KunlunOps:
             # We acquire workspace only once for the whole fused MoE.
             # The same flat buffers are then reinterpreted as different tensor
             # views whose lifetimes do not overlap:
-            # - `scratch_b` always stores the W1 output `y`
+            # - `scratch_b` initially stores the W1 output `y`, and may be
+            #   reused for the W2 output `out` once activation is complete
             # - for small-M, `scratch_a` stores activated output `out1`
             # - for large-M, activation is fused into `y`, so `scratch_a`
             #   can be reused for the W2 output `out`
