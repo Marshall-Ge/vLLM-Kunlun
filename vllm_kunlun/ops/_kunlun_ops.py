@@ -500,7 +500,7 @@ class KunlunOps:
             use_presorted_preprocess = token_rows > 768
             use_separate_activation_buffer = M < 1024
 
-            # We acquire workspace only once for the whole fused MoE path.
+            # We acquire workspace only once for the whole fused MoE.
             # The same flat buffers are then reinterpreted as different tensor
             # views whose lifetimes do not overlap:
             # - `scratch_b` always stores the W1 output `y`
