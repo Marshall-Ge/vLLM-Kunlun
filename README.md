@@ -81,7 +81,6 @@ This plugin provides a hardware-pluggable interface that decouples the integrati
 | GLM4.5Air | ✅ |✅ | | ✅ |
 | GLM4.7 | ✅ | ✅| | ✅ |
 | GLM5 | ✅ | ✅| | ✅ |
-| Kimi-K2 | ✅ | ✅ | | ✅ |
 | DeepSeek-R1 | ✅ | ✅ | | ✅ |
 | DeepSeek-V3 | ✅ | ✅ | | ✅ |
 | DeepSeek-V3.2 | ✅ | ✅ | | ✅ |
